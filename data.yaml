@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 3
+names: ['Bird', 'Pipe', 'Restart-Button']
+
+roboflow:
+  workspace: ai-and-game-programming
+  project: flappy-bird-szoat
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/ai-and-game-programming/flappy-bird-szoat/dataset/1
