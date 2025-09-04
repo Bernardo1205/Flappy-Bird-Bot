@@ -3,18 +3,25 @@ import os
 from Actions import Actions
 import numpy as np
 import cv2
+import gymnasium as gym
+from gymnasium import spaces
+from ultralytics import YOLO
 
 
-class FlappyBirdEnv:
+class FlappyBirdEnv(gym.Env):
     def __init__(self, config):
+        super(FlappyBirdEnv, self).__init__()
         self.actions = Actions()
-        self.vision_model = self.YOLO('runs/detect/train4/weights/best.pt')
+        self.vision_model = YOLO('runs/detect/train4/weights/best.pt')
         self.image_path = os.path.join("game-images", "screenshot.png")
 
+        self.action_space = spaces.Discrete(len(self.get_available_actions()))
+        self.obs_shape = self._getstate().shape
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=self.obs_shape, dtype=np.float32)
+
+        self.MAX_PIPES = 8
         self.game_over = False
         self.num_pipes = 0
-
-        self.available_actions = self.get_available_actions()
 
     def reset(self):
         time.sleep(3)
@@ -29,7 +36,9 @@ class FlappyBirdEnv:
             reward = self._compute_reward(self._getstate())
             reward -= 100  # Penalty for game over
             self.game_over = True
-            return self._getstate(), reward, self.game_over
+            info = {}
+            terminated = truncated  = self.game_over
+            return self._getstate(), reward, terminated, truncated , info
 
         if action_index == 1:  # Flap action
             self.actions.press_space()
@@ -37,38 +46,54 @@ class FlappyBirdEnv:
         self.game_over = False
         reward = self._compute_reward(self._getstate()) + self.num_pipes
         reward += 1  # Small reward for staying alive
-        return self._getstate(), reward, self.game_over
+        info = {}
+        terminated = truncated = self.game_over
+        return self._getstate(), reward, terminated, truncated, info
 
     def _getstate(self):
         # Capture the current game state
         self.actions.capture_game(self.image_path)
-        img = np.array(self.image_path)
+        img= cv2.imread(self.image_path)
         img_final = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
         results = self.vision_model(img_final, conf=0.5)
 
-        boxes = results[0].boxes.xyxy.cpu().numpy()  # Tensor containing [x_min, y_min, x_max, y_max] for each box
+        boxes = results[0].boxes.xyxy.cpu().tolist()  # Tensor containing [x_min, y_min, x_max, y_max] for each box
+        class_indices = results[0].boxes.cls.cpu().tolist()  # Class indices
 
-        class_indices = results[0].boxes.cls.cpu().numpy()  # Class indices
+        bird_box = np.array(boxes.pop(class_indices.index(0)))  # Assuming class index 0 is the bird
+        pipes_boxes = np.array(boxes)  # Remaining boxes are pipes
 
-        # Sort boxes based on class indices , so the fsrt box is always the bird
-        paired = sorted(zip(boxes, class_indices), key=lambda x: x[1])
+        sorted_boxes = sorted(pipes_boxes, key=lambda pipe: abs(pipe[0] - bird_box[0]))
+        sorted_boxes.insert(0, bird_box)  # Insert the bird box at the beginning
 
-        sorted_boxes, sorted_class_indices = zip(*paired)
+        #Pad or truncate the number of boxes so the state is always the same size
+        if len(sorted_boxes) < self.MAX_PIPES:
+            sorted_boxes += [np.array([0, 0, 0, 0])] * (self.MAX_PIPES - len(sorted_boxes))
 
-        # Convert the tensor to a list or NumPy array if needed
-        return sorted_boxes
+        sorted_boxes_dist = sorted_boxes[:self.MAX_PIPES]
+
+        #Flaten because we want a 1D array
+        state = [coord for box in sorted_boxes_dist for coord in box]
+        return np.array(state , dtype=np.float32)
 
     def _compute_reward(self, state):
         if state is None:
             return 0
-        bird_box = state[0]  # Assuming the first box is the bird
-        closest_pipe = min(state[1:], key=lambda pipe: abs(pipe[0] - state[0][0]))
-        if bird_box[1] < closest_pipe[1] and bird_box[3] > closest_pipe[3]:
+
+        bird_box = state[:4]  # Assuming the first box is the bird
+        pipe1 = state[4:8]
+        pipe2 = state[8:12]
+
+        upper_pipe = pipe1 if pipe1[1] < pipe2[1] else pipe2
+        lower_pipe = pipe2 if pipe1[1] < pipe2[1] else pipe1
+
+        # [x_min, y_min, x_max, y_max]
+
+        if bird_box[0] > upper_pipe[0] and bird_box[2] < upper_pipe[2]  and bird_box[1] > upper_pipe[3] and bird_box[3] < lower_pipe[1]:
             self.num_pipes += 2
             return 10  # Reward for passing through the pipe
-
+        return 0
     def get_available_actions(self):
         actions = [0, 1]  # 0: Do nothing, 1: Flap
         return actions
-
