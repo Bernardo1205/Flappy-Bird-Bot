@@ -25,6 +25,7 @@ def train():
 
         while not done:
             action= model.predict(state, deterministic=True)
+            print(action)
             next_state, reward, terminated , truncated, info = env.step(action)
             done = terminated or truncated
             total_reward += reward

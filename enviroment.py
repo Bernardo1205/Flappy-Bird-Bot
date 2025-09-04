@@ -15,20 +15,21 @@ class FlappyBirdEnv(gym.Env):
         self.vision_model = YOLO('runs/detect/train4/weights/best.pt')
         self.image_path = os.path.join("game-images", "screenshot.png")
 
-        self.action_space = spaces.Discrete(len(self.get_available_actions()))
-        self.obs_shape = self._getstate().shape
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=self.obs_shape, dtype=np.float32)
-
         self.MAX_PIPES = 8
         self.game_over = False
         self.num_pipes = 0
 
-    def reset(self):
+        self.action_space = spaces.Discrete(len(self.get_available_actions()))
+        self.obs_shape = self._getstate().shape
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=self.obs_shape, dtype=np.float32)
+
+    def reset(self, seed = None , options = None):
+        super().reset(seed=seed)
         time.sleep(3)
         self.actions.click_start()
         self.num_pipes = 0
         self.game_over = False
-        return self._getstate()
+        return self._getstate() , {}
 
     def step(self, action_index):
 
