@@ -2,9 +2,9 @@ import pyautogui
 
 class Actions:
     def __init__(self):
-        window = pyautogui.getActiveWindow()
-        self.window_top =window.top
-        self.window_left = window.left
+        window = pyautogui.size()
+        self.window_top = 0
+        self.window_left = 0
         self.window_width = window.width
         self.window_height = window.height
         self.battel_buttom = (1400, 1112)
@@ -15,7 +15,7 @@ class Actions:
         screenshot.save(save_path)
 
     def detect_game_over(self):
-        if pyautogui.pixelMatchesColor(self.battel_buttom[0], self.battel_buttom[1], (23, 166, 76)):
+        if pyautogui.pixelMatchesColor(self.battel_buttom[0], self.battel_buttom[1], (22, 159, 73)):
             return True
         return False
     def press_space(self):
