@@ -15,7 +15,7 @@ class Actions:
         screenshot.save(save_path)
 
     def detect_game_over(self):
-        if pyautogui.pixelMatchesColor(self.battel_buttom[0], self.battel_buttom[1], (22, 159, 73)):
+        if pyautogui.pixelMatchesColor(self.battel_buttom[0], self.battel_buttom[1], (23, 166, 76)) or pyautogui.pixelMatchesColor(self.battel_buttom[0], self.battel_buttom[1], (22, 159, 73)) :
             return True
         return False
     def press_space(self):

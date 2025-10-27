@@ -36,7 +36,7 @@ while True:
     img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
     # Run YOLOv8 inference
-    results = model(img, conf=0.5)  # Adjust confidence threshold as needed
+    results = model.predict(img) # Adjust confidence threshold as needed
 
     # Visualize results
     annotated_frame = results[0].plot()

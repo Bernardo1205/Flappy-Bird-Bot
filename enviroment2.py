@@ -1,3 +1,21 @@
+"""
+    This enviroment in a new update 2.0 version of the Flappy Bird enviroment in whch it uses
+    A new state representation t try to improve the performance of the RL agent.
+
+    Changes :
+        The state will consist now only of the bird box and the next gap that the bird must pass through. This is
+        because the agent only needs to focus on the immediate challenge to make decisions, and parsing all the gaps would
+        add unnecessary complexity and computational overhead.  By focusing on the next space_throught, you simplify the
+        state representation, reduce the dimensionality of the input, and ensure the agent is not distracted by irrelevant
+        information. This approach aligns with the principle of providing the agent with only the most relevant information
+        for decision-making.
+
+        Resize the image before passing it to the YOLO model to improve detection speed.
+
+        Change in the reward function to give a reward base on the gap and include a small treshold to consider the bird
+        
+"""
+
 import time
 import os
 import pyautogui
@@ -21,7 +39,8 @@ class FlappyBirdEnv(gym.Env):
         self.frame_count = 0
         self.last_state = None  # cache last detection
 
-        self.MAX_PIPES = 8
+        self.treshold = 2  # Margin of error for being inside the gap
+        self.MAX_PIPES = 3
         self.game_over = False
         self.num_pipes = 0
 
@@ -107,36 +126,85 @@ class FlappyBirdEnv(gym.Env):
 
         pipes_boxes = np.array(boxes)  # Remaining boxes are pipes
         sorted_boxes = sorted(pipes_boxes, key=lambda pipe: abs(pipe[0] - bird_box[0]))
+
+        # New : Ensure the first two boxes are the upper and lower pipes of the next gap
+        if len(sorted_boxes) >= 2:
+            upper_pipe, lower_pipe = sorted(sorted_boxes[:2], key=lambda pipe: pipe[1])  # Sort by y_min
+            sorted_boxes[:2] = [upper_pipe, lower_pipe]
+
+
+        else:  # If no pipes detected, create a fake gap in the center
+            img_h, img_w = img_final.shape[:2]
+            # Place a fake gap roughly at the middle height and a bit to the right (e.g., 70% width)
+            fake_gap_width = img_w * 0.15
+            gap_x_min = img_w * 0.6
+            gap_x_max = gap_x_min + fake_gap_width
+
+            gap_y_center = img_h / 2
+            gap_height = img_h * 0.25  # adjustable depending on your game
+            gap_y_min = gap_y_center - gap_height / 2
+            gap_y_max = gap_y_center + gap_height / 2
+
+            upper_pipe = np.array([gap_x_min, 0, gap_x_max, gap_y_min])
+            lower_pipe = np.array([gap_x_min, gap_y_max, gap_x_max, img_h])
+
+            sorted_boxes = [upper_pipe, lower_pipe]
+
         sorted_boxes.insert(0, bird_box)  # Insert the bird box at the beginning
 
-        # Pad or truncate the number of boxes so the state is always the same size
-        if len(sorted_boxes) < self.MAX_PIPES:
-            sorted_boxes += [np.array([0, 0, 0, 0])] * (self.MAX_PIPES - len(sorted_boxes))
+        # New : Instead of parsing the bird box and then the pipes boxes separately, we will parse the model the bird
+        # box and the gap box between the pipes which is the space the bird has to fly through
 
-        sorted_boxes_dist = sorted_boxes[:self.MAX_PIPES]
+        # [x_min, y_min, x_max, y_max]
+        space_throught = np.array([
+            sorted_boxes[1][0],  # x_min of upper pipe
+            sorted_boxes[1][3],  # y_max of upper pipe
+            sorted_boxes[2][2],  # x_max of lower pipe
+            sorted_boxes[2][1]  # y_min of lower pipe
+        ])
 
-        #Flaten because we want a 1D array
+        sorted_boxes_dist = [sorted_boxes[0], space_throught]
+
+        # Flaten because we want a 1D array
         state = np.array([coord for box in sorted_boxes_dist for coord in box])
         self.last_state = state
+
+        # Then normalize (assuming 2 boxes → 8 coords)
+        img_h, img_w = img_final.shape[:2]
+        state = state / np.array([img_w, img_h, img_w, img_h] * (len(state) // 4))
         return state
 
     def _compute_reward(self, state):
         if state is None:
             return 0
 
-        bird_box = state[:4]  # Assuming the first box is the bird
-        pipe1 = state[4:8]
-        pipe2 = state[8:12]
+        bird_box = state[:4]
+        gap = state[4:8]
 
-        upper_pipe = pipe1 if pipe1[1] < pipe2[1] else pipe2
-        lower_pipe = pipe2 if pipe1[1] < pipe2[1] else pipe1
+        bird_center_y = (bird_box[1] + bird_box[3]) / 2
+        gap_center_y = (gap[1] + gap[3]) / 2
 
-        # [x_min, y_min, x_max, y_max]
-        if bird_box[0] > upper_pipe[0] and bird_box[2] < upper_pipe[2] and bird_box[1] > upper_pipe[3] and bird_box[3] < \
-                lower_pipe[1]:
-            self.num_pipes += 2
-            return 10  # Reward for passing through the pipe
-        return 0
+        # reward based on how close the bird is to the center of the gap
+        distance = abs(bird_center_y - gap_center_y)
+        reward = -distance / 100  # normalize distance penalty
+
+        # bonus for survival
+        reward += 1.0
+
+        in_gap_horizontally = (
+                bird_box[2] >= gap[0] - self.treshold and
+                bird_box[0] <= gap[2] + self.treshold
+        )
+        in_gap_vertically = (
+                bird_box[1] >= gap[1] and
+                bird_box[3] <= gap[3]
+        )
+
+        # Bonus if the bird is inside the gap horizontally (within threshold) and vertically
+        if in_gap_horizontally and in_gap_vertically:
+            reward += 10.0  # large positive reward for being inside gap
+
+        return reward
 
     def get_available_actions(self):
         actions = [0, 1]  # 0: Do nothing, 1: Flap
